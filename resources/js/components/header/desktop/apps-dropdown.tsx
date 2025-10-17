@@ -37,13 +37,13 @@ export function AppsDropdown({
     const allApps: App[] = [
         ...initialApps,
         // Menu disesuaikan dengan permintaan
-        { category: 'All Role', name: 'My Division', icon: 'fas fa-building', path: '/my-division' },
-        { category: 'Author', name: 'My Article', icon: 'fas fa-pen-square', path: '/my-articles' },
+        { category: 'All Role', name: 'My Division', icon: 'fas fa-building', path: '/division' },
+        { category: 'Author', name: 'My Article', icon: 'fas fa-pen-square', path: '/articles' },
         { category: 'Editor Rubrik', name: 'Management Review Article', icon: 'fas fa-edit', path: '/review-articles' },
         { category: 'Admin Rubrik', name: 'Management Approval Article', icon: 'fas fa-check-double', path: '/approval-articles' },
 
         // Menu Super Admin
-        { category: 'Super Admin', name: 'Management Articles', icon: 'fas fa-file-alt', path: '/admin/articles' },
+        { category: 'Super Admin', name: 'Management Articles', icon: 'fas fa-file-alt', path: '/admin/articles/manage' },
         { category: 'Super Admin', name: 'Management Roles', icon: 'fas fa-user-tag', path: '/admin/roles' },
         { category: 'Super Admin', name: 'Management Permissions', icon: 'fas fa-shield-alt', path: '/admin/permissions' },
         { category: 'Super Admin', name: 'Management Rubriks', icon: 'fas fa-newspaper', path: '/admin/rubriks' },

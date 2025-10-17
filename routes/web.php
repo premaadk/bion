@@ -5,8 +5,8 @@ use App\Http\Controllers\Admin\PermissionsController;
 use App\Http\Controllers\Admin\RolesController;
 use App\Http\Controllers\Admin\RubriksController;
 use App\Http\Controllers\Admin\UsersController;
-use App\Http\Controllers\Admin\AuthorArticlesController;
 use App\Http\Controllers\Admin\ArticleApprovalController;
+use App\Http\Controllers\AuthorArticlesController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -87,8 +87,10 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::post('articles/{article}/reject', [ArticleApprovalController::class, 'reject'])->name('articles.reject');
     Route::post('articles/{article}/publish', [ArticleApprovalController::class, 'publish'])->name('articles.publish');
     
-    // === My Article (Author) ===
+});
 
+Route::middleware(['auth', 'verified'])->group(function () {
+    // === My Article (Author) ===
     Route::resource('articles', AuthorArticlesController::class);
 });
 

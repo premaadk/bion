@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Admin;
+namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Article\StoreArticleRequest;
@@ -24,7 +24,7 @@ class AuthorArticlesController extends Controller
             ->latest('updated_at')
             ->get(['id','title','slug','status','rubrik_id','updated_at','created_at']);
 
-        return Inertia::render('admin/articles/index', [
+        return Inertia::render('articles/index', [
             'articles' => $articles->map(fn(Article $a) => [
                 'id' => $a->id,
                 'title' => $a->title,
@@ -41,7 +41,7 @@ class AuthorArticlesController extends Controller
 
     public function create()
     {
-        return Inertia::render('admin/articles/create', [
+        return Inertia::render('articles/create', [
             'rubriks' => Rubrik::orderBy('name')->get(['id','name']),
         ]);
     }
@@ -60,14 +60,14 @@ class AuthorArticlesController extends Controller
             'meta'      => $request->input('meta', []),
         ]);
 
-        return to_route('admin.articles.index')->with('success','Draft created.');
+        return to_route('articles.index')->with('success','Draft created.');
     }
 
     public function edit(Article $article)
     {
         $this->authorize('update', $article);
 
-        return Inertia::render('admin/articles/edit', [
+        return Inertia::render('articles/edit', [
             'article' => [
                 'id' => $article->id,
                 'title' => $article->title,
@@ -93,7 +93,7 @@ class AuthorArticlesController extends Controller
     {
         $this->authorize('view', $article);
 
-        return Inertia::render('admin/articles/show', [
+        return Inertia::render('articles/show', [
             'article' => [
                 'id'      => $article->id,
                 'title'   => $article->title,
@@ -112,7 +112,7 @@ class AuthorArticlesController extends Controller
     {
         $this->authorize('delete', $article);
         $article->delete();
-        return to_route('admin.articles.index')->with('success','Draft deleted.');
+        return to_route('articles.index')->with('success','Draft deleted.');
     }
 
     public function submit(Request $request, Article $article)
@@ -132,6 +132,6 @@ class AuthorArticlesController extends Controller
             'note'        => $request->input('note'),
         ]);
 
-        return to_route('admin.articles.index')->with('success','Article submitted.');
+        return to_route('articles.index')->with('success','Article submitted.');
     }
 }

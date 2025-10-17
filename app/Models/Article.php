@@ -42,6 +42,18 @@ class Article extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (self $article) {
+            if (empty($article->status)) {
+                $article->status = self::STATUS_DRAFT;
+            }
+            if (empty($article->author_id) && auth()->check()) {
+                $article->author_id = auth()->id();
+            }
+        });
+    }
+
     public function author(): BelongsTo
     {
         return $this->belongsTo(User::class,'author_id');
@@ -50,6 +62,11 @@ class Article extends Model
     public function rubrik(): BelongsTo
     {
         return $this->belongsTo(Rubrik::class,'rubrik_id');
+    }
+
+    public function division()
+    {
+        return $this->belongsTo(\App\Models\Division::class);
     }
 
     public function setTitleAttribute($value)

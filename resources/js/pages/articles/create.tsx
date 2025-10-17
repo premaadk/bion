@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Head, Link, useForm } from "@inertiajs/react";
 import AppLayout from "@/layouts/app-layout";
 import { PageHero } from "@/components/page-hero";
-import articles from "@/routes/admin/articles";
+import articles from "@/routes/articles";
 import { Newspaper, Save } from "lucide-react";
 
 type Option = { id: number | string; name: string };

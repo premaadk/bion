@@ -2,7 +2,7 @@ import React from "react";
 import { Head, Link, usePage } from "@inertiajs/react";
 import AppLayout from "@/layouts/app-layout";
 import { PageHero } from "@/components/page-hero";
-import articles from "@/routes/admin/articles";
+import articles from "@/routes/articles";
 import { Newspaper } from "lucide-react";
 
 type ArticleDTO = {
