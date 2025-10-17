@@ -36,10 +36,13 @@ export function AppsDropdown({
     // Penambahan data di sini adalah untuk tujuan demonstrasi.
     const allApps: App[] = [
         ...initialApps,
-        // Contoh penambahan role lain sebelum Super Admin
-        { category: 'Publisher', name: 'Publish Queue', icon: 'fas fa-paper-plane', path: '/publisher/queue' },
+        // Menu disesuaikan dengan permintaan
+        { category: 'All Role', name: 'My Division', icon: 'fas fa-building', path: '/my-division' },
+        { category: 'Author', name: 'My Article', icon: 'fas fa-pen-square', path: '/my-articles' },
+        { category: 'Editor Rubrik', name: 'Management Review Article', icon: 'fas fa-edit', path: '/review-articles' },
+        { category: 'Admin Rubrik', name: 'Management Approval Article', icon: 'fas fa-check-double', path: '/approval-articles' },
 
-        // Menambahkan menu baru pada Super Admin
+        // Menu Super Admin
         { category: 'Super Admin', name: 'Management Articles', icon: 'fas fa-file-alt', path: '/admin/articles' },
         { category: 'Super Admin', name: 'Management Roles', icon: 'fas fa-user-tag', path: '/admin/roles' },
         { category: 'Super Admin', name: 'Management Permissions', icon: 'fas fa-shield-alt', path: '/admin/permissions' },
@@ -54,8 +57,8 @@ export function AppsDropdown({
     const displayedApps = filteredApps.slice(0, loadedCount);
     const hasMoreApps = filteredApps.length > loadedCount;
     
-    // Menambahkan kategori role baru ke dalam urutan
-    const categories = ['All Role', 'Author', 'Editor Rubrik', 'Admin Rubrik', 'Publisher', 'Super Admin'];
+    // Urutan kategori diperbarui, 'Publisher' dihapus
+    const categories = ['All Role', 'Author', 'Editor Rubrik', 'Admin Rubrik', 'Super Admin'];
 
     return (
         <div className="relative" data-dropdown-container="apps">
@@ -99,15 +102,16 @@ export function AppsDropdown({
                                         <p className="px-2 pt-2 pb-1 text-xs font-bold text-gray-500 uppercase">{category}</p>
                                         <div className="space-y-1">
                                             {categoryApps.map((app, index) => (
-                                                <button
+                                                <a
                                                     key={index}
-                                                    // Panggil onAppNavigation dengan path aplikasi saat tombol diklik
+                                                    href={app.path}
+                                                    // onAppNavigation tetap dipanggil untuk menangani logika lain (mis: menutup dropdown)
                                                     onClick={() => onAppNavigation(app.path)}
                                                     className="flex items-center p-2 text-gray-700 hover:bg-gray-100 rounded-md w-full text-left transition-colors"
                                                 >
                                                     <i className={`${app.icon} w-6 mr-3 text-center`}></i>
                                                     <span>{app.name}</span>
-                                                </button>
+                                                </a>
                                             ))}
                                         </div>
                                     </div>
@@ -141,4 +145,3 @@ export function AppsDropdown({
         </div>
     );
 }
-
