@@ -1,10 +1,11 @@
 import React from 'react';
 
-// Definisikan tipe data untuk sebuah aplikasi
+// Definisikan tipe data untuk sebuah aplikasi, tambahkan 'path'
 type App = {
     category: string;
     name: string;
     icon: string;
+    path: string; // Properti untuk menyimpan URL atau rute navigasi
 };
 
 // Definisikan props yang dibutuhkan oleh komponen ini
@@ -16,24 +17,45 @@ interface AppsDropdownProps {
     onSearch: (term: string) => void;
     loadedCount: number;
     onLoadMore: () => void;
-    onAppNavigation: (appName: string) => void;
+    onAppNavigation: (appPath: string) => void; // Prop sekarang menerima path (string)
 }
 
 export function AppsDropdown({ 
     isActive, 
     onToggle, 
-    apps, 
+    apps: initialApps,
     searchTerm, 
     onSearch, 
     loadedCount, 
     onLoadMore, 
     onAppNavigation 
 }: AppsDropdownProps) {
-    const filteredApps = apps.filter(app =>
+
+    // NOTE: Idealnya, semua data aplikasi (termasuk path) 
+    // dikirim melalui prop `initialApps` dari komponen induk.
+    // Penambahan data di sini adalah untuk tujuan demonstrasi.
+    const allApps: App[] = [
+        ...initialApps,
+        // Contoh penambahan role lain sebelum Super Admin
+        { category: 'Publisher', name: 'Publish Queue', icon: 'fas fa-paper-plane', path: '/publisher/queue' },
+
+        // Menambahkan menu baru pada Super Admin
+        { category: 'Super Admin', name: 'Management Articles', icon: 'fas fa-file-alt', path: '/admin/articles' },
+        { category: 'Super Admin', name: 'Management Roles', icon: 'fas fa-user-tag', path: '/admin/roles' },
+        { category: 'Super Admin', name: 'Management Permissions', icon: 'fas fa-shield-alt', path: '/admin/permissions' },
+        { category: 'Super Admin', name: 'Management Rubriks', icon: 'fas fa-newspaper', path: '/admin/rubriks' },
+        { category: 'Super Admin', name: 'Management Division', icon: 'fas fa-sitemap', path: '/admin/divisions' },
+        { category: 'Super Admin', name: 'Management Users', icon: 'fas fa-users-cog', path: '/admin/users' }
+    ];
+
+    const filteredApps = allApps.filter(app =>
         app.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
     const displayedApps = filteredApps.slice(0, loadedCount);
     const hasMoreApps = filteredApps.length > loadedCount;
+    
+    // Menambahkan kategori role baru ke dalam urutan
+    const categories = ['All Role', 'Author', 'Editor Rubrik', 'Admin Rubrik', 'Publisher', 'Super Admin'];
 
     return (
         <div className="relative" data-dropdown-container="apps">
@@ -68,7 +90,7 @@ export function AppsDropdown({
                     </div>
                     <div className="flex flex-col h-96">
                         <div className="flex-1 overflow-y-auto px-2 pt-1">
-                            {['All Role', 'Author', 'Editor Rubrik', 'Admin Rubrik', 'Super Admin'].map(category => {
+                            {categories.map(category => {
                                 const categoryApps = displayedApps.filter(app => app.category === category);
                                 if (categoryApps.length === 0) return null;
 
@@ -79,7 +101,8 @@ export function AppsDropdown({
                                             {categoryApps.map((app, index) => (
                                                 <button
                                                     key={index}
-                                                    onClick={() => onAppNavigation(app.name)}
+                                                    // Panggil onAppNavigation dengan path aplikasi saat tombol diklik
+                                                    onClick={() => onAppNavigation(app.path)}
                                                     className="flex items-center p-2 text-gray-700 hover:bg-gray-100 rounded-md w-full text-left transition-colors"
                                                 >
                                                     <i className={`${app.icon} w-6 mr-3 text-center`}></i>
@@ -118,3 +141,4 @@ export function AppsDropdown({
         </div>
     );
 }
+

@@ -5,6 +5,8 @@ use App\Http\Controllers\Admin\PermissionsController;
 use App\Http\Controllers\Admin\RolesController;
 use App\Http\Controllers\Admin\RubriksController;
 use App\Http\Controllers\Admin\UsersController;
+use App\Http\Controllers\Admin\AuthorArticlesController;
+use App\Http\Controllers\Admin\ArticleApprovalController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -64,6 +66,30 @@ Route::prefix('admin')->name('admin.')->group(function () {
         // Rute kustom untuk menugaskan role secara massal (bulk)
         Route::post('users/bulk-assign-role', [UsersController::class, 'bulkAssignRole'])->name('users.bulk.assign.role');
     });
+});
+
+Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () {
+    // submit (Author)
+    Route::get('articles/manage', [ArticleApprovalController::class, 'index'])->name('articles.manage.index');
+    Route::get('articles/manage/{article}', [ArticleApprovalController::class, 'show'])->name('articles.manage.show');
+    
+    // === Management Article (Editor/Admin/Super Admin) ===
+    Route::post('articles/{article}/submit', [AuthorArticlesController::class, 'submit'])->name('articles.submit');
+    
+    
+    // Editor actions
+    Route::post('articles/{article}/review-editor', [ArticleApprovalController::class, 'startEditorReview'])->name('articles.review.editor');
+    Route::post('articles/{article}/request-revision', [ArticleApprovalController::class, 'requestRevision'])->name('articles.request.revision');
+    Route::post('articles/{article}/approve', [ArticleApprovalController::class, 'approve'])->name('articles.approve');
+    
+    // Admin actions
+    Route::post('articles/{article}/review-admin', [ArticleApprovalController::class, 'startAdminReview'])->name('articles.review.admin');
+    Route::post('articles/{article}/reject', [ArticleApprovalController::class, 'reject'])->name('articles.reject');
+    Route::post('articles/{article}/publish', [ArticleApprovalController::class, 'publish'])->name('articles.publish');
+    
+    // === My Article (Author) ===
+
+    Route::resource('articles', AuthorArticlesController::class);
 });
 
 require __DIR__.'/settings.php';
