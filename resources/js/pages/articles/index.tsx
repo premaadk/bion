@@ -1,490 +1,391 @@
-import React, { useMemo, useState } from "react";
-import { Head, Link, router, usePage } from "@inertiajs/react";
-import AppLayout from "@/layouts/app-layout";
-import { PageHero } from "@/components/page-hero";
-import authorRoutes from "@/routes/articles";         // Wayfinder: resource author (non-admin)
-import adminArticleRoutes from "@/routes/admin/articles"; // Wayfinder: admin submit action
-import {
-  FileText,
-  Search,
-  Plus,
-  CalendarClock,
-  Layers,
-  Building2,
-  Eye,
-  Pencil,
-  Trash2,
-  Send,
-  CheckCircle2,
-  FolderOpenDot,
-} from "lucide-react";
-
-/* ================= Types ================= */
-type Id = string | number;
+// resources/js/pages/articles/index.tsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from '@inertiajs/react';
 
 type ArticleRow = {
-  id: Id;
+  id: number;
   title: string;
   slug?: string | null;
-  status:
-    | "draft"
-    | "submitted"
-    | "review_editor"
-    | "revision"
-    | "revised"
-    | "approved"
-    | "review_admin"
-    | "rejected"
-    | "published"
-    | string;
-  rubrik?: string | null;
-  division?: string | null;
-  author_id?: Id | null;
-  created_at?: string | null;
+  status: string;                 // draft/submitted/review_editor/revision/revised/approved/review_admin/rejected/published
+  rubrik?: string | null;         // nama rubrik (bisa di-slugify)
+  excerpt?: string | null;
+  cover_url?: string | null;
   updated_at?: string | null;
+  created_at?: string | null;
+  reason?: string | null;         // optional: alasan reject terakhir
 };
 
 type PageProps = {
   articles: ArticleRow[];
-  // optional, kalau kamu expose auth user via props.auth.user (Breeze/Fortify)
-  auth?: { user?: { id: Id; name?: string } };
-  me?: { id: Id; name?: string }; // fallback kalau kamu kirim eksplisit "me"
+  labels: Record<string, string>;
+  rubriks?: { id: number; name: string }[];
 };
 
-/* ============== Wayfinder types (longgar) ============== */
-type WFArticles = {
-  index: { url: () => string };
-  create: { url: () => string };
-  show: { url: (p: { article: Id }) => string };
-  edit: { url: (p: { article: Id }) => string };
-  destroy: { url: (p: { article: Id }) => string };
-};
-type WFAdminArticles = {
-  submit: { url: (p: { article: Id }) => string };
-};
-
-const wf = authorRoutes as unknown as WFArticles;
-const wfAdmin = adminArticleRoutes as unknown as WFAdminArticles;
-
-/* ================= Utils ================= */
-const toDate = (val?: string | number | Date | null): Date | null => {
-  if (!val) return null;
-  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
-  const s = String(val);
-  if (/^\d+$/.test(s)) {
-    const n = Number(s);
-    return new Date(s.length === 10 ? n * 1000 : n);
-  }
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
-    const d = new Date(s.replace(" ", "T") + "Z");
-    return isNaN(d.getTime()) ? null : d;
-  }
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
+type UiArticle = {
+  id: number;
+  title: string;
+  description: string;
+  thumbnail?: string;
+  status: 'publish' | 'draft' | 'review' | 'rejected'; // untuk filter/label
+  rawStatus: string;           // status backend asli → untuk rules tombol Edit
+  slug?: string;
+  rubrikName?: string | null;
+  createdDate: string;
+  reason?: string;
 };
 
-const fmtDate = (value?: string | null) => {
-  const d = toDate(value ?? undefined);
-  if (!d) return "—";
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(d);
-  } catch {
-    return value ?? "—";
-  }
+const mapToUiStatus = (s: string): UiArticle['status'] => {
+  if (s === 'published') return 'publish';
+  if (s === 'draft') return 'draft';
+  if (s === 'rejected') return 'rejected';
+  return 'review'; // submitted/review_editor/revision/revised/approved/review_admin → review
 };
 
-const statusLabel: Record<string, string> = {
-  draft: "Draft",
-  submitted: "Submitted",
-  review_editor: "Review by Editor",
-  revision: "Revision",
-  revised: "Revised",
-  approved: "Approved",
-  review_admin: "Review by Admin",
-  rejected: "Rejected",
-  published: "Published",
-};
+const formatDate = (iso?: string | null) =>
+  iso ? new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '';
 
-const statusClass: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-800",
-  submitted: "bg-indigo-100 text-indigo-800",
-  review_editor: "bg-amber-100 text-amber-800",
-  revision: "bg-yellow-100 text-yellow-800",
-  revised: "bg-cyan-100 text-cyan-800",
-  approved: "bg-emerald-100 text-emerald-800",
-  review_admin: "bg-orange-100 text-orange-800",
-  rejected: "bg-red-100 text-red-800",
-  published: "bg-green-100 text-green-800",
-};
+const slugify = (input: string): string =>
+  input
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
 
-/* ================= Page ================= */
-export default function Index() {
-  const { url, props } = usePage<PageProps>() as any;
-  const p = (props as PageProps) ?? {};
-  const allArticles = p.articles ?? [];
+export default function MyArticlesIndex({ articles }: PageProps) {
+  const [activeFilter, setActiveFilter] = useState<'semua'|'publish'|'draft'|'review'|'rejected'>('semua');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [visibleCount, setVisibleCount] = useState(5);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // ambil user id dari props.auth.user atau props.me
-  const myId = (p.auth?.user?.id ?? p.me?.id) as Id | undefined;
+  // transform data dari backend → struktur UI
+  const articlesData = useMemo<UiArticle[]>(
+    () =>
+      (articles || []).map(a => ({
+        id: a.id,
+        title: a.title,
+        description: a.excerpt || '',
+        thumbnail: a.cover_url || undefined,
+        status: mapToUiStatus(a.status),
+        rawStatus: a.status,
+        slug: a.slug ?? undefined,
+        rubrikName: a.rubrik ?? null,
+        createdDate: formatDate(a.updated_at || a.created_at),
+        reason: a.reason || undefined,
+      })),
+    [articles]
+  );
 
-  // SAFETY LAYER: meskipun backend seharusnya sudah filter,
-  // kita tetap batasi di FE supaya "hanya artikel saya" yang muncul.
-  const myArticles = useMemo(() => {
-    if (!myId) return allArticles; // jika tidak tersedia, anggap backend sudah filter
-    return allArticles.filter((a) =>
-      a.author_id == null ? true : String(a.author_id) === String(myId)
+  // counter per filter
+  const filterCounts = useMemo(
+    () => ({
+      semua: articlesData.length,
+      publish: articlesData.filter(x => x.status === 'publish').length,
+      draft: articlesData.filter(x => x.status === 'draft').length,
+      review: articlesData.filter(x => x.status === 'review').length,
+      rejected: articlesData.filter(x => x.status === 'rejected').length,
+    }),
+    [articlesData]
+  );
+
+  // apply filter + search
+  const filteredArticles = useMemo(() => {
+    let list = articlesData;
+    if (activeFilter !== 'semua') list = list.filter(a => a.status === activeFilter);
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      list = list.filter(a => a.title.toLowerCase().includes(q));
+    }
+    return list;
+  }, [articlesData, activeFilter, searchTerm]);
+
+  const visibleArticles = filteredArticles.slice(0, visibleCount);
+  const loadMore = () => setVisibleCount(v => v + 5);
+
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setIsDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  const getFilterLabel = (f: string) =>
+    ({ semua: 'Semua', publish: 'Publish', draft: 'Draft', review: 'Menunggu Review', rejected: 'Ditolak' }[f] || 'Semua');
+
+  const getStatusBadge = (status: UiArticle['status']) => {
+    const cfg = {
+      publish: { icon: 'fas fa-check-circle', klass: 'bg-green-100 text-green-800', label: 'Publish' },
+      draft:   { icon: 'fas fa-pencil-alt',   klass: 'bg-gray-100 text-gray-800',  label: 'Draft' },
+      review:  { icon: 'fas fa-hourglass-half', klass: 'bg-yellow-100 text-yellow-800', label: 'Menunggu Review' },
+      rejected:{ icon: 'fas fa-times-circle', klass: 'bg-red-100 text-red-800', label: 'Ditolak' },
+    } as const;
+    const c = cfg[status];
+    return (
+      <span className={`inline-flex items-center px-3 py-0.5 rounded-full text-xs font-semibold ${c.klass}`}>
+        <i className={`${c.icon} mr-1.5`} /> {c.label}
+      </span>
     );
-  }, [allArticles, myId]);
-
-  // ---- Stats (Hero) ----
-  const totalMine = myArticles.length;
-  const totalPublished = myArticles.filter((a) => a.status === "published").length;
-
-  // ---- Tabs ----
-  const isIndex = url.startsWith("/articles") && !/\/create|\/\d+\/(edit|show)/.test(url);
-  const isCreate = /\/articles\/create/.test(url);
-
-  // ---- Filters ----
-  const [term, setTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
-
-  const filtered = useMemo(() => {
-    const t = term.trim().toLowerCase();
-    return myArticles.filter((a) => {
-      const m =
-        !t ||
-        a.title.toLowerCase().includes(t) ||
-        (a.rubrik ?? "").toLowerCase().includes(t) ||
-        (a.division ?? "").toLowerCase().includes(t);
-      const s = !statusFilter || a.status === statusFilter;
-      return m && s;
-    });
-  }, [myArticles, term, statusFilter]);
-
-  // ---- Actions (Author rules) ----
-  const canEdit = (a: ArticleRow) => a.status === "draft" || a.status === "revision";
-  const canDelete = (a: ArticleRow) => a.status === "draft";
-  const canSubmit = (a: ArticleRow) => a.status === "draft"; // revision = hanya RU (tidak submit)
-
-  const onDelete = (a: ArticleRow) => {
-    if (!canDelete(a)) return;
-    if (!confirm(`Hapus artikel "${a.title}"?`)) return;
-    router.delete(wf.destroy.url({ article: a.id }), {
-      preserveScroll: true,
-      preserveState: true,
-    });
   };
 
-  const onSubmit = (a: ArticleRow) => {
-    if (!canSubmit(a)) return;
-    if (!confirm(`Submit artikel "${a.title}" untuk ditinjau Editor?`)) return;
-    // submit route ada di admin prefix: admin.articles.submit
-    router.post(
-      (wfAdmin.submit as { url: (p: { article: Id }) => string }).url({ article: a.id }),
-      {},
-      { preserveScroll: true }
+  // URL helper:
+  // - published → /articles/{slug-rubrik}/{slug-article}
+  //   (fallback aman jika slug tidak tersedia → /articles/{id})
+  // - selain published → /articles/{id} (read-only progress)
+  const viewUrlOf = (a: UiArticle) => {
+    if (a.status === 'publish') {
+      const rubrikSlug = a.rubrikName ? slugify(a.rubrikName) : null;
+      const articleSlug = a.slug ? a.slug : null;
+      if (rubrikSlug && articleSlug) {
+        return `/articles/${rubrikSlug}/${articleSlug}`;
+      }
+      // fallback jika backend belum kirim slug lengkap
+      return `/articles/${a.id}`;
+    }
+    return `/articles/${a.id}`;
+  };
+
+  // Tombol aksi:
+  // - Selalu tampilkan 2 tombol: Lihat & Edit
+  // - Edit hanya aktif untuk rawStatus = draft atau revision
+  const actionsFor = (a: UiArticle) => {
+    const canEdit = a.rawStatus === 'draft' || a.rawStatus === 'revision';
+    return (
+      <div className="flex flex-wrap gap-3 items-center">
+        <Link
+          href={viewUrlOf(a)}
+          className="text-sm font-semibold text-[#203b8a] hover:underline"
+        >
+          Lihat &rarr;
+        </Link>
+        {canEdit ? (
+          <Link
+            href={`/articles/${a.id}/edit`}
+            className="text-sm font-semibold text-emerald-700 hover:underline"
+          >
+            Edit &rarr;
+          </Link>
+        ) : (
+          <span
+            aria-disabled
+            className="text-sm font-semibold text-gray-400 cursor-not-allowed"
+            title="Hanya bisa diedit saat status Draft atau Revision"
+          >
+            Edit &rarr;
+          </span>
+        )}
+      </div>
     );
   };
 
   return (
-    <AppLayout>
-      <Head title="My Articles" />
-
-      <PageHero
-        badge={{ text: "My Article", icon: <FileText className="h-4 w-4" /> }}
-        title="Artikelku"
-        description="Kelola artikelmu: buat draft, edit, dan kirim untuk ditinjau."
-        gradient={{
-          from: "#203b8a",
-          via: "#2a4db3",
-          to: "#3560dc",
-          direction: "to right",
-          overlayOpacity: 0.66,
-        }}
-        media={{ imageUrl: "/images/hero/abstract-wave.jpg", objectPosition: "center", dimOpacity: 0.2 }}
-        stats={[
-          { value: totalMine, label: "Total", icon: <FolderOpenDot className="h-5 w-5" /> },
-          { value: filtered.length, label: "Filtered", icon: <CheckCircle2 className="h-5 w-5" /> },
-          { value: totalPublished, label: "Published", icon: <CheckCircle2 className="h-5 w-5" /> },
-        ]}
-      />
-
-      <div className="container mx-auto max-w-7xl px-4 pt-6 pb-[calc(env(safe-area-inset-bottom)+96px)] md:pb-8">
-        {/* ===== Tabs — Mobile ===== */}
-        <div className="md:hidden mb-6">
-          <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-gray-200 shadow-sm">
-            <Link
-              href={wf.index.url()}
-              className={`flex flex-col items-center justify-center gap-1 py-3 ${
-                isIndex ? "bg-[#1f3b8a] text-white" : "bg-white text-gray-900 hover:bg-gray-50"
-              }`}
-              aria-current={isIndex ? "page" : undefined}
-            >
-              <FileText className="h-5 w-5" />
-              <span className="text-xs font-medium">My Articles</span>
-            </Link>
-            <Link
-              href={wf.create.url()}
-              className={`flex flex-col items-center justify-center gap-1 border-l py-3 ${
-                isCreate ? "bg-[#1f3b8a] text-white" : "bg-white text-gray-900 hover:bg-gray-50"
-              }`}
-              aria-current={isCreate ? "page" : undefined}
-            >
-              <Plus className="h-5 w-5" />
-              <span className="text-xs font-medium">Create</span>
-            </Link>
+    <main className="w-full">
+      {/* HERO */}
+      <div className="w-full pt-6 sm:pt-8 lg:pt-12">
+        <div className="relative mx-4 sm:mx-6 lg:mx-8 mb-8 sm:mb-10 lg:mb-14 rounded-2xl bg-gradient-to-r from-[#203b8a] via-[#2a4db3] to-[#3560dc] min-h-[200px] sm:min-h-[240px] lg:min-h-[280px] overflow-visible">
+          <div className="absolute inset-0 rounded-2xl overflow-hidden">
+            <img
+              src="https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=1080&q=80"
+              alt=""
+              className="w-full h-full object-cover opacity-20"
+              onError={(e) => { e.currentTarget.src = 'https://placehold.co/1080x400/203b8a/ffffff?text=Artikelku+Hero'; }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#203b8a]/85 to-[#3560dc]/70" />
           </div>
-        </div>
 
-        {/* ===== Tabs — Desktop ===== */}
-        <div className="hidden md:flex mb-6 gap-2">
-          <Link
-            href={wf.index.url()}
-            className={`inline-flex items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-semibold transition-colors ${
-              isIndex ? "bg-[#1f3b8a] text-white border-[#1f3b8a]" : "bg-white text-gray-900 border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            <FileText className="h-5 w-5" />
-            My Articles
-          </Link>
-          <Link
-            href={wf.create.url()}
-            className={`inline-flex items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-semibold transition-colors ${
-              isCreate ? "bg-[#1f3b8a] text-white border-[#1f3b8a]" : "bg-white text-gray-900 border-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            <Plus className="h-5 w-5" />
-            Create Article
-          </Link>
-        </div>
+          <div className="relative z-10 h-full flex items-center justify-center text-white text-center py-8 sm:py-10 lg:py-12 px-3 sm:px-4 lg:px-6">
+            <div className="max-w-4xl w-full space-y-6">
+              <div className="hidden sm:flex justify-center">
+                <div className="inline-flex items-center bg-white/25 backdrop-blur-sm rounded-full px-5 py-2.5 border border-white/20">
+                  <i className="fas fa-newspaper text-yellow-300 mr-2 text-base" />
+                  <span className="text-base font-medium">Kelola Artikel</span>
+                </div>
+              </div>
+              <div className="block sm:hidden absolute top-4 right-4">
+                <div className="inline-flex items-center bg-white/25 backdrop-blur-sm rounded-full px-3 py-1.5 border border-white/20">
+                  <i className="fas fa-newspaper text-yellow-300 mr-1.5 text-xs" />
+                  <span className="text-xs font-medium">Kelola Artikel</span>
+                </div>
+              </div>
 
-        {/* ===== Toolbar ===== */}
-        <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm md:p-6">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Cari judul/rubrik/division…"
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm outline-none ring-0 focus:border-gray-300 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
-                value={term}
-                onChange={(e) => setTerm(e.target.value)}
-              />
-            </div>
+              <div className="space-y-2 sm:space-y-4 mt-12 sm:mt-0">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight">Artikel Saya</h1>
+                <p className="text-base sm:text-lg lg:text-xl opacity-95 leading-relaxed">Lihat, kelola, dan buat artikel baru Anda di sini.</p>
+              </div>
 
-            <select
-              className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 px-3 text-sm outline-none ring-0 focus:border-gray-300 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="">Semua Status</option>
-              {[
-                "draft",
-                "submitted",
-                "review_editor",
-                "revision",
-                "revised",
-                "approved",
-                "review_admin",
-                "rejected",
-                "published",
-              ].map((s) => (
-                <option key={s} value={s}>
-                  {statusLabel[s] ?? s}
-                </option>
-              ))}
-            </select>
-
-            <div className="flex items-center md:justify-end">
-              <Link
-                href={wf.create.url()}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#1f3b8a] px-4 py-2 text-sm font-medium text-white hover:opacity-95"
-              >
-                <Plus className="h-4 w-4" />
-                New Article
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* ===== Desktop table ===== */}
-        <div className="hidden overflow-hidden rounded-xl border border-gray-200 bg-white md:block">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr className="text-left">
-                  <th className="px-6 py-4 font-medium text-gray-700">Title</th>
-                  <th className="px-6 py-4 font-medium text-gray-700">Status</th>
-                  <th className="px-6 py-4 font-medium text-gray-700">Rubrik</th>
-                  <th className="px-6 py-4 font-medium text-gray-700">Division</th>
-                  <th className="px-6 py-4 font-medium text-gray-700">Updated</th>
-                  <th className="px-6 py-4 font-medium text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filtered.map((a) => {
-                  const s = String(a.status || "draft");
-                  return (
-                    <tr key={String(a.id)} className="hover:bg-gray-50/60">
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-gray-900">{a.title}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`rounded px-2 py-1 text-xs font-medium ${statusClass[s] ?? "bg-gray-100 text-gray-800"}`}>
-                          {statusLabel[s] ?? s}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-800">
-                          <Layers className="h-3.5 w-3.5" /> {a.rubrik ?? "—"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-800">
-                          <Building2 className="h-3.5 w-3.5" /> {a.division ?? "—"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <CalendarClock className="h-4 w-4 text-gray-400" />
-                          {fmtDate(a.updated_at)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={wf.show.url({ article: a.id })}
-                            className="rounded p-1 text-gray-500 hover:text-indigo-600"
-                            title="View"
+              {/* FILTER BAR */}
+              <div className="pt-4 sm:pt-6 relative z-40">
+                <div className="max-w-6xl mx-auto px-2 sm:px-4">
+                  <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-4 sm:p-6 border border-white/20">
+                    <div className="flex flex-col items-center gap-4">
+                      {/* desktop group */}
+                      <div className="hidden sm:flex flex-wrap items-center justify-center gap-2">
+                        {(['semua','publish','draft','review','rejected'] as const).map(f => (
+                          <button
+                            key={f}
+                            onClick={() => setActiveFilter(f)}
+                            className={`font-semibold py-2 px-4 rounded-full text-sm transition-all ${
+                              activeFilter === f ? 'bg-white text-[#203b8a] shadow-md' : 'bg-white/20 hover:bg-white/30 text-white border border-white/20'
+                            }`}
                           >
-                            <Eye className="h-5 w-5" />
-                          </Link>
+                            {getFilterLabel(f)} ({filterCounts[f]})
+                          </button>
+                        ))}
+                      </div>
 
-                          {canEdit(a) && (
-                            <Link
-                              href={wf.edit.url({ article: a.id })}
-                              className="rounded p-1 text-gray-500 hover:text-indigo-600"
-                              title="Edit"
-                            >
-                              <Pencil className="h-5 w-5" />
-                            </Link>
-                          )}
+                      {/* mobile dropdown */}
+                      <div className="block sm:hidden w-full max-w-xs" ref={dropdownRef}>
+                        <div className="relative">
+                          <button
+                            onClick={() => setIsDropdownOpen(p => !p)}
+                            className="w-full bg-white/20 border border-white/20 text-white rounded-full py-2.5 px-4 flex items-center justify-between text-sm font-semibold hover:bg-white/30"
+                          >
+                            <span>{getFilterLabel(activeFilter)} ({filterCounts[activeFilter]})</span>
+                            <i className={`fas fa-chevron-down transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                          </button>
 
-                          {canSubmit(a) && (
-                            <button
-                              onClick={() => onSubmit(a)}
-                              className="rounded p-1 text-indigo-600 hover:bg-indigo-50"
-                              title="Submit for review"
-                            >
-                              <Send className="h-5 w-5" />
-                            </button>
-                          )}
-
-                          {canDelete(a) && (
-                            <button
-                              onClick={() => onDelete(a)}
-                              className="rounded p-1 text-gray-500 hover:text-red-600"
-                              title="Delete"
-                            >
-                              <Trash2 className="h-5 w-5" />
-                            </button>
+                          {isDropdownOpen && (
+                            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-lg border border-gray-200 z-50 overflow-hidden">
+                              {(['semua','publish','draft','review','rejected'] as const).map(f => (
+                                <button
+                                  key={f}
+                                  onClick={() => { setActiveFilter(f); setIsDropdownOpen(false); }}
+                                  className={`w-full text-left px-4 py-3 text-sm ${activeFilter === f ? 'bg-[#203b8a] text-white font-semibold' : 'text-gray-800 hover:bg-gray-50'}`}
+                                >
+                                  <span className="flex items-center justify-between">
+                                    <span>{getFilterLabel(f)}</span>
+                                    <span className={`text-xs px-2 py-1 rounded-full ${activeFilter === f ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                                      {filterCounts[f]}
+                                    </span>
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
                           )}
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </div>
 
-          {filtered.length === 0 && (
-            <div className="py-14 text-center">
-              <FileText className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-              <p className="text-gray-500">Belum ada artikel.</p>
-            </div>
-          )}
-        </div>
-
-        {/* ===== Mobile cards ===== */}
-        <div className="space-y-4 md:hidden">
-          {filtered.length === 0 ? (
-            <div className="rounded-xl border border-gray-200 bg-white p-6 text-center">
-              <FileText className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-              <p className="text-gray-500">Belum ada artikel.</p>
-            </div>
-          ) : (
-            filtered.map((a) => {
-              const s = String(a.status || "draft");
-              return (
-                <div key={String(a.id)} className="rounded-xl border border-gray-200 bg-white p-4">
-                  <div className="mb-3 flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="text-base font-semibold text-gray-900">{a.title}</div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                        <span className={`rounded px-2 py-1 font-medium ${statusClass[s] ?? "bg-gray-100 text-gray-800"}`}>
-                          {statusLabel[s] ?? s}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-800">
-                          <Layers className="h-3.5 w-3.5" /> {a.rubrik ?? "—"}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-800">
-                          <Building2 className="h-3.5 w-3.5" /> {a.division ?? "—"}
-                        </span>
+                      {/* search + create */}
+                      <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-2xl">
+                        <div className="relative flex-1 w-full">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3">
+                            <i className="fas fa-search text-white/60" />
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="Cari judul artikel..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full bg-white/20 border border-white/20 text-white placeholder-white/60 rounded-full py-2.5 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-white/50 text-sm"
+                          />
+                        </div>
+                        <Link
+                          href="/articles/create"
+                          className="w-full sm:w-auto bg-white hover:bg-white/90 text-[#203b8a] font-bold py-2.5 px-6 rounded-full flex items-center justify-center shadow-md text-sm"
+                        >
+                          <i className="fas fa-plus mr-2" /> Tulis Artikel Baru
+                        </Link>
                       </div>
                     </div>
-                    <div className="ml-2 flex items-center gap-1">
-                      <Link
-                        href={wf.show.url({ article: a.id })}
-                        className="rounded p-2 text-gray-500 hover:text-indigo-600"
-                        title="View"
-                      >
-                        <Eye className="h-5 w-5" />
-                      </Link>
-                      {canEdit(a) && (
-                        <Link
-                          href={wf.edit.url({ article: a.id })}
-                          className="rounded p-2 text-gray-500 hover:text-indigo-600"
-                          title="Edit"
-                        >
-                          <Pencil className="h-5 w-5" />
-                        </Link>
-                      )}
-                      {canSubmit(a) && (
-                        <button
-                          onClick={() => onSubmit(a)}
-                          className="rounded p-2 text-indigo-600 hover:bg-indigo-50"
-                          title="Submit for review"
-                        >
-                          <Send className="h-5 w-5" />
-                        </button>
-                      )}
-                      {canDelete(a) && (
-                        <button
-                          onClick={() => onDelete(a)}
-                          className="rounded p-2 text-gray-500 hover:text-red-600"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="border-t border-gray-100 pt-2 text-xs text-gray-500">
-                    Updated: {fmtDate(a.updated_at)}
                   </div>
                 </div>
-              );
-            })
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* LIST */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-6">
+        <div className="space-y-4">
+          {visibleArticles.length === 0 ? (
+            <div className="bg-white rounded-lg shadow-md p-8 text-center">
+              <i className="fas fa-newspaper text-gray-400 text-4xl mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Tidak ada artikel ditemukan</h3>
+              <p className="text-gray-600">
+                {searchTerm ? `Tidak ada artikel yang sesuai dengan pencarian "${searchTerm}"` : 'Belum ada artikel dalam kategori ini'}
+              </p>
+            </div>
+          ) : (
+            visibleArticles.map(a => (
+              <div key={a.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+                <div className="p-5 flex flex-col md:flex-row gap-5">
+                  {/* Thumb */}
+                  {a.thumbnail ? (
+                    <img className="h-40 w-full md:w-56 object-cover rounded-md" src={a.thumbnail} alt="" />
+                  ) : (
+                    <div className="h-40 w-full md:w-56 bg-gray-200 rounded-md flex items-center justify-center">
+                      <i className="fas fa-image text-gray-400 text-4xl" />
+                    </div>
+                  )}
+
+                  {/* Body */}
+                  <div className="flex-grow flex flex-col">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        {getStatusBadge(a.status)}
+                        <div className="relative">
+                          <button className="text-gray-500 hover:bg-gray-200 w-8 h-8 rounded-full opacity-0 md:opacity-100 transition-opacity">
+                            <i className="fas fa-ellipsis-h" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <h2 className={`text-xl font-bold mb-2 ${a.status === 'review' || a.status === 'rejected' ? 'text-gray-600' : 'text-gray-900'} hover:text-[#203b8a]`}>
+                        {a.title}
+                      </h2>
+
+                      {!!a.description && (
+                        <p className={`text-sm leading-relaxed hidden sm:block ${a.status === 'review' || a.status === 'rejected' ? 'text-gray-500' : 'text-gray-600'}`}>
+                          {a.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-gray-500 gap-3">
+                      <div className="flex items-center space-x-4">
+                        {a.status === 'rejected' && a.reason ? (
+                          <span className="font-semibold text-red-600">Alasan: {a.reason}</span>
+                        ) : (
+                          <span className="font-medium">Diperbarui: {a.createdDate}</span>
+                        )}
+                      </div>
+                      <p className="font-medium">
+                        {a.status === 'draft'
+                          ? 'Terakhir disimpan'
+                          : a.status === 'review'
+                          ? 'Diajukan'
+                          : a.status === 'rejected'
+                          ? 'Ditinjau'
+                          : 'Diterbitkan'}: {a.createdDate}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer actions → 2 tombol: Lihat & Edit */}
+                <div className="bg-gray-50 px-5 py-3 flex flex-wrap gap-3 justify-end items-center">
+                  {actionsFor(a)}
+                </div>
+              </div>
+            ))
+          )}
+
+          {visibleCount < filteredArticles.length && (
+            <div className="text-center pt-4">
+              <button
+                onClick={loadMore}
+                className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-6 border border-gray-300 rounded-lg shadow-sm"
+              >
+                Muat Lebih Banyak
+              </button>
+            </div>
           )}
         </div>
       </div>
-    </AppLayout>
+    </main>
   );
 }

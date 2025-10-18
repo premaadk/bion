@@ -75,7 +75,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     
     // === Management Article (Editor/Admin/Super Admin) ===
     Route::post('articles/{article}/submit', [AuthorArticlesController::class, 'submit'])->name('articles.submit');
-    
+    Route::put('articles/{article}/content', [ArticleApprovalController::class, 'updateContent']);
     
     // Editor actions
     Route::post('articles/{article}/review-editor', [ArticleApprovalController::class, 'startEditorReview'])->name('articles.review.editor');
@@ -91,6 +91,9 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
 
 Route::middleware(['auth', 'verified'])->group(function () {
     // === My Article (Author) ===
+    Route::get('/articles/{rubrik}/{slug}', [AuthorArticlesController::class, 'published'])->name('articles.published');
+    Route::post('articles/{article}/cover', [AuthorArticlesController::class, 'updateCover'])->name('articles.cover');
+    Route::post('articles/{article}/revised', [AuthorArticlesController::class, 'markRevised'])->name('articles.revised');
     Route::resource('articles', AuthorArticlesController::class);
 });
 

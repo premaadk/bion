@@ -18,6 +18,7 @@ class ArticleReview extends Model
 
     public function actor(): BelongsTo
     {
-        return $this->belongsTo(User::class,'actor_id');
+        // cukup id & name untuk ditampilkan
+        return $this->belongsTo(User::class, 'actor_id')->select(['id', 'name']);
     }
 }

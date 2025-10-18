@@ -1,11 +1,17 @@
-// resources/js/pages/articles/show.tsx
+// resources/js/pages/admin/articles/show.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { router } from '@inertiajs/react';
 import AppLayout from '@/layouts/app-layout';
 import PageHero from '@/components/page-hero';
 import {
   FileText,
   ShieldCheck,
   Highlighter,
+  Eraser,
+  BadgeCheck,
+  Stamp,
+  CheckCircle2,
+  XCircle,
   Eye,
   Image as ImageIcon,
   Tag as TagIcon,
@@ -65,24 +71,37 @@ const ST = {
   PUBLISHED: 'published',
 } as const;
 
-export default function AuthorArticleShow({ article, labels, reviews: reviewsProp }: ShowPageProps) {
+export default function AdminArticleShow({ article, labels, reviews: reviewsProp }: ShowPageProps) {
   // ================== State ==================
+  const [note, setNote] = useState<string>('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // Quill (read-only viewer, highlight-only via our buttons)
   const editorRef = useRef<HTMLDivElement>(null);
   const quillRef = useRef<any>(null);
   const [highlightCount, setHighlightCount] = useState<number>(0);
+  const [hasSelection, setHasSelection] = useState<boolean>(false);
 
   // ================== Status helpers ==================
   const status = article.status;
-  const isSubmitted   = status === ST.SUBMITTED;
-  const isReviewEditor= status === ST.REVIEW_EDITOR;
-  const isRevision    = status === ST.REVISION;
-  const isRevised     = status === ST.REVISED;
-  const isApproved    = status === ST.APPROVED;
+  const isSubmitted = status === ST.SUBMITTED;
+  const isReviewEditor = status === ST.REVIEW_EDITOR;
+  const isRevision = status === ST.REVISION;
+  const isRevised = status === ST.REVISED;
+  const isApproved = status === ST.APPROVED;
   const isReviewAdmin = status === ST.REVIEW_ADMIN;
-  const isRejected    = status === ST.REJECTED;
-  const isPublished   = status === ST.PUBLISHED;
+  const isRejected = status === ST.REJECTED;
+  const isPublished = status === ST.PUBLISHED;
 
-  // ================== Quill Init (viewer only) ==================
+  const canRequestRevision =
+    isReviewEditor && note.trim().length > 0 && highlightCount > 0 && !busy;
+  const canApprove = isReviewEditor && !busy;
+  const canReject = isReviewAdmin && !busy;
+  const canPublish = isReviewAdmin && !busy;
+  const canStartEditorReview = (isSubmitted || isRevised) && !busy;
+  const canStartAdminReview = isApproved && !busy;
+
+  // ================== Quill Init (viewer) ==================
   useEffect(() => {
     const init = () => {
       if (!editorRef.current || quillRef.current) return;
@@ -95,6 +114,11 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
 
       // paste initial content
       quillRef.current.clipboard.dangerouslyPasteHTML(article.content || '');
+
+      // track selection
+      quillRef.current.on('selection-change', (range: any) => {
+        setHasSelection(!!range && range.length > 0);
+      });
 
       recountHighlights();
     };
@@ -128,6 +152,54 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
     }
     const spans = root.querySelectorAll<HTMLElement>('[style*="background"]');
     setHighlightCount(spans.length);
+  };
+
+  const withTempEnable = (fn: () => void) => {
+    if (!quillRef.current) return;
+    const wasEnabled = quillRef.current.isEnabled();
+    quillRef.current.enable(true);
+    try {
+      fn();
+    } finally {
+      quillRef.current.enable(wasEnabled);
+      recountHighlights();
+    }
+  };
+
+  // ===== Persist HTML (agar stabilo tidak hilang setelah refresh)
+  const saveContentNow = () => {
+    if (!quillRef.current) return;
+    const html = quillRef.current.root.innerHTML;
+    router.put(`/admin/articles/${article.id}/content`, { content: html }, { preserveScroll: true });
+  };
+
+  const applyHighlight = () => {
+    if (!quillRef.current) return;
+    const range = quillRef.current.getSelection(true);
+    if (!range || range.length === 0) return;
+    withTempEnable(() => {
+      quillRef.current.format('background', '#fff59d'); // soft yellow
+    });
+    saveContentNow();
+  };
+
+  const removeHighlight = () => {
+    if (!quillRef.current) return;
+    const range = quillRef.current.getSelection(true);
+    if (!range || range.length === 0) return;
+    withTempEnable(() => {
+      quillRef.current.format('background', false);
+    });
+    saveContentNow();
+  };
+
+  const clearAllHighlights = () => {
+    if (!quillRef.current) return;
+    withTempEnable(() => {
+      const len = quillRef.current.getLength();
+      quillRef.current.formatText(0, len, 'background', false);
+    });
+    saveContentNow();
   };
 
   // ================== Cover URL resolver (robust) ==================
@@ -181,6 +253,53 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
   const lastRevisionNote = useMemo(() => {
     return reviews.find((r) => r.action === 'request_revision' && (r.note ?? '').trim() !== '');
   }, [reviews]);
+
+  // ================== Actions ==================
+  const postAction = (url: string, payload?: Record<string, any>) =>
+    new Promise<void>((resolve) => {
+      router.post(url, payload ?? {}, { preserveScroll: true, onFinish: () => resolve() });
+    });
+
+  const onStartEditorReview = async () => {
+    setBusy('review-editor');
+    await postAction(`/admin/articles/${article.id}/review-editor`, { note: note || null });
+    setBusy(null);
+  };
+
+  const onRequestRevision = async () => {
+    if (!canRequestRevision) return;
+    setBusy('request-revision');
+    await postAction(`/admin/articles/${article.id}/request-revision`, { note });
+    setBusy(null);
+  };
+
+  const onApprove = async () => {
+    if (!canApprove) return;
+    setBusy('approve');
+    await postAction(`/admin/articles/${article.id}/approve`, { note: note || null });
+    setBusy(null);
+  };
+
+  const onStartAdminReview = async () => {
+    if (!canStartAdminReview) return;
+    setBusy('review-admin');
+    await postAction(`/admin/articles/${article.id}/review-admin`, { note: note || null });
+    setBusy(null);
+  };
+
+  const onReject = async () => {
+    if (!canReject) return;
+    setBusy('reject');
+    await postAction(`/admin/articles/${article.id}/reject`, { note: note || null });
+    setBusy(null);
+  };
+
+  const onPublish = async () => {
+    if (!canPublish) return;
+    setBusy('publish');
+    await postAction(`/admin/articles/${article.id}/publish`, { note: note || null });
+    setBusy(null);
+  };
 
   // ================== UI helpers ==================
   const StatusPill: React.FC<{ label: string; variant: 'success' | 'warning' | 'muted' | 'danger' | 'info' }> = ({
@@ -240,6 +359,7 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
   };
 
   const label = (k: string) => labels[k] ?? k;
+
   const authorText = (() => {
     const base = article.author ? article.author : '—';
     return article.is_anonymous ? `Anonim (${base})` : base;
@@ -249,7 +369,7 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
   return (
     <AppLayout>
       <PageHero
-        badge={{ text: 'Artikel Saya', icon: <ShieldCheck className="h-4 w-4" /> }}
+        badge={{ text: 'Manajemen Artikel', icon: <ShieldCheck className="h-4 w-4" /> }}
         title={article.title}
         description={
           article.rubrik
@@ -309,8 +429,7 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
                   <div className="font-semibold mb-1">Catatan Revisi Terakhir</div>
                   <div className="whitespace-pre-wrap">{lastRevisionNote.note}</div>
                   <div className="mt-1 text-[11px] text-yellow-800/80">
-                    {lastRevisionNote.actor ? `Oleh ${lastRevisionNote.actor}` : 'Editor'}
-                    {lastRevisionNote.created_at ? ` • ${new Date(lastRevisionNote.created_at).toLocaleString()}` : ''}
+                    {lastRevisionNote.actor ? `Oleh ${lastRevisionNote.actor}` : 'Editor'}{lastRevisionNote.created_at ? ` • ${new Date(lastRevisionNote.created_at).toLocaleString()}` : ''}
                   </div>
                 </div>
               )}
@@ -357,12 +476,12 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
               )}
             </div>
 
-            {/* Konten (Readonly) */}
+            {/* Review Editor (Highlight-only) */}
             <div className="bg-white rounded-lg shadow-md p-6">
               <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
                 <div className="flex items-center gap-2">
                   <Highlighter className="h-5 w-5 text-yellow-600" />
-                  <h3 className="font-semibold text-gray-800">Konten Artikel</h3>
+                  <h3 className="font-semibold text-gray-800">Konten Artikel (Stabilo Revisi)</h3>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500">Stabilo: </span>
@@ -370,6 +489,44 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
                     {highlightCount}
                   </span>
                 </div>
+              </div>
+
+              {/* Custom toolbar (only highlight buttons) */}
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={applyHighlight}
+                  disabled={!hasSelection}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border text-sm font-medium
+                             bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Tandai teks terpilih dengan stabilo"
+                >
+                  <Highlighter className="h-4 w-4" />
+                  Stabilo
+                </button>
+                <button
+                  type="button"
+                  onClick={removeHighlight}
+                  disabled={!hasSelection}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border text-sm font-medium
+                             bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Hapus stabilo pada teks terpilih"
+                >
+                  <Eraser className="h-4 w-4" />
+                  Hapus Stabilo Terpilih
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllHighlights}
+                  className="ml-auto inline-flex items-center gap-2 px-3 py-2 rounded-md border text-sm font-medium
+                             bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                  title="Bersihkan semua stabilo"
+                >
+                  <Eraser className="h-4 w-4" />
+                  Bersihkan Semua
+                </button>
               </div>
 
               {/* Quill viewer node */}
@@ -388,12 +545,11 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
                   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                   min-height: 360px;
                 }
-                .ql-editor img { max-width: 100%; height: auto; border-radius: 0.5rem; }
               `}</style>
               <div ref={editorRef} className="min-h-[360px]" />
               <p className="mt-3 text-xs text-gray-500 flex items-center gap-1">
                 <Eye className="h-3.5 w-3.5" />
-                Tampilan hanya-baca untuk memantau proses persetujuan. Stabilo kuning dari editor akan terlihat di sini.
+                Konten dikunci untuk mencegah perubahan. Anda hanya dapat menandai <em>stabilo</em> pada teks; setiap perubahan stabilo langsung disimpan.
               </p>
             </div>
 
@@ -418,6 +574,21 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
                   ))}
                 </ul>
               )}
+            </div>
+
+            {/* Note input untuk tindakan berikutnya */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <label className="block font-semibold text-gray-700 mb-2">Catatan / Komentar</label>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={4}
+                placeholder="Tuliskan alasan revisi / persetujuan / pertimbangan admin di sini..."
+                className="w-full border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-[#203b8a]/30 focus:border-[#203b8a]"
+              />
+              <div className="mt-2 text-xs text-gray-500">
+                Untuk mengaktifkan tombol <strong>Minta Revisi</strong>, berikan setidaknya 1 stabilo pada konten dan isi catatan.
+              </div>
             </div>
           </div>
 
@@ -447,7 +618,7 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
                           s.pulse ? 'animate-pulse' : ''
                         }`}
                       >
-                        {(s.dot.startsWith('bg-green') || s.dot.startsWith('bg-blue') || s.dot.startsWith('bg-yellow')) ? (
+                        {s.dot.startsWith('bg-green') || s.dot.startsWith('bg-blue') || s.dot.startsWith('bg-yellow') ? (
                           <i className="fas fa-check text-xs text-white" />
                         ) : null}
                       </div>
@@ -458,10 +629,106 @@ export default function AuthorArticleShow({ article, labels, reviews: reviewsPro
               </ul>
             </div>
 
+            {/* Action Panel - Editor */}
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="font-bold text-xl border-b pb-3 mb-4 flex items-center gap-2">
+                <BadgeCheck className="h-5 w-5 text-blue-600" />
+                Aksi Editor
+              </h3>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={onStartEditorReview}
+                  disabled={!canStartEditorReview}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border
+                             bg-blue-600 text-white hover:bg-blue-700 border-blue-700
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Stamp className="h-4 w-4" />
+                  Review by Editor
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onRequestRevision}
+                  disabled={!canRequestRevision}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border
+                             bg-yellow-50 text-yellow-900 border-yellow-300 hover:bg-yellow-100
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Highlighter className="h-4 w-4" />
+                  Minta Revisi
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onApprove}
+                  disabled={!canApprove}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border
+                             bg-green-600 text-white hover:bg-green-700 border-green-700
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Approve (Editor)
+                </button>
+              </div>
+              <p className="mt-3 text-xs text-gray-500">
+                Tombol <strong>Revisi</strong> & <strong>Approve</strong> aktif setelah artikel masuk tahap <em>Review by Editor</em>.
+              </p>
+            </div>
+
+            {/* Action Panel - Admin */}
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="font-bold text-xl border-b pb-3 mb-4 flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-indigo-600" />
+                Aksi Admin
+              </h3>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={onStartAdminReview}
+                  disabled={!canStartAdminReview}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border
+                             bg-indigo-600 text-white hover:bg-indigo-700 border-indigo-700
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Stamp className="h-4 w-4" />
+                  Review by Admin
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onReject}
+                  disabled={!canReject}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border
+                             bg-red-50 text-red-900 border-red-300 hover:bg-red-100
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <XCircle className="h-4 w-4" />
+                  Reject
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onPublish}
+                  disabled={!canPublish}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border
+                             bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-700
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Publish
+                </button>
+              </div>
+              <p className="mt-3 text-xs text-gray-500">
+                Tombol <strong>Reject</strong> & <strong>Publish</strong> aktif setelah artikel masuk tahap <em>Review by Admin</em>.
+              </p>
+            </div>
+
             {/* Hints */}
             <div className="bg-white p-4 rounded-lg shadow text-xs text-gray-500">
-              <p className="mb-1">• Halaman ini bersifat <strong>read-only</strong>.</p>
-              <p>• Gunakan halaman <em>Edit</em> untuk mengirim revisi saat status masuk tahap <strong>Revisi</strong>.</p>
+              <p className="mb-1">• Stabilo tidak mengubah isi artikel. Gunakan untuk menandai bagian yang perlu revisi.</p>
+              <p>• Perubahan stabilo disimpan otomatis (persist di server) tiap kali Anda menambah/menghapus stabilo.</p>
             </div>
           </div>
         </div>
